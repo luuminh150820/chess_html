@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mother Fking Chess - Fixed History</title>
+    <title>Mother Fking Chess - Full Rules</title>
     <style>
         :root {
             --bg-color: #2c3e50;
@@ -202,6 +202,10 @@
         let isFlipped = false;
         let selectedSquare = null;
         let legalMoves = [];
+        
+        // Biến hỗ trợ luật đặc biệt
+        let lastMove = null; // Lưu nước đi cuối để tính En Passant
+        let movedPieces = new Set(); // Lưu các quân đã từng di chuyển (Vua, Xe) để tính Nhập thành
 
         function createBoard() {
             boardElement.innerHTML = '';
@@ -234,7 +238,21 @@
             updateCapturedUI();
         }
 
-        function getPseudoLegalMoves(r, c) {
+        // Kiểm tra xem một ô có đang bị tấn công bởi màu đối phương không
+        function isSquareAttacked(r, c, attackerColor) {
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const piece = boardState[i][j];
+                    if (piece && piece[0] === attackerColor) {
+                        const moves = getPseudoLegalMoves(i, j, true);
+                        if (moves.some(m => m.r === r && m.c === c)) return true;
+                    }
+                }
+            }
+            return false;
+        }
+
+        function getPseudoLegalMoves(r, c, ignoreCastling = false) {
             const piece = boardState[r][c];
             if (!piece) return [];
             const color = piece[0], type = piece[1], moves = [];
@@ -248,22 +266,55 @@
 
             if (type === 'P') {
                 const dir = color === 'w' ? -1 : 1;
+                // Đi thẳng
                 if (boardState[r+dir] && !boardState[r+dir][c]) {
                     moves.push({r: r+dir, c: c});
-                    if (((color === 'w' && r === 6) || (color === 'b' && r === 1)) && !boardState[r+2*dir][c]) moves.push({r: r+2*dir, c: c});
+                    if (((color === 'w' && r === 6) || (color === 'b' && r === 1)) && !boardState[r+2*dir][c]) {
+                        moves.push({r: r+2*dir, c: c});
+                    }
                 }
+                // Ăn chéo
                 [1, -1].forEach(dc => {
                     const target = boardState[r+dir] ? boardState[r+dir][c+dc] : null;
                     if (target && target[0] !== color) moves.push({r: r+dir, c: c+dc});
+                    
+                    // LUẬT: EN PASSANT (Bắt tốt qua đường)
+                    if (!target && lastMove && lastMove.piece[1] === 'P' && lastMove.toR === r && lastMove.toC === c+dc && Math.abs(lastMove.fromR - lastMove.toR) === 2) {
+                        moves.push({r: r+dir, c: c+dc, isEnPassant: true});
+                    }
                 });
             } else if (directions[type]) {
                 for (let [dr, dc] of directions[type]) {
                     let nr = r + dr, nc = c + dc;
                     while (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
                         const target = boardState[nr][nc];
-                        if (!target) { moves.push({r: nr, c: nc}); if (type === 'N' || type === 'K') break; }
-                        else { if (target[0] !== color) moves.push({r: nr, c: nc}); break; }
+                        if (!target) { 
+                            moves.push({r: nr, c: nc}); 
+                            if (type === 'N' || type === 'K') break; 
+                        } else { 
+                            if (target[0] !== color) moves.push({r: nr, c: nc}); 
+                            break; 
+                        }
                         nr += dr; nc += dc;
+                    }
+                }
+
+                // LUẬT: NHẬP THÀNH (Castling)
+                if (type === 'K' && !ignoreCastling && !movedPieces.has(`${r},${c}`)) {
+                    const oppColor = color === 'w' ? 'b' : 'w';
+                    if (!getCheckPos(color)) { // Không được nhập thành khi đang bị chiếu
+                        // Nhập thành gần (King side)
+                        if (!movedPieces.has(`${r},7`) && !boardState[r][5] && !boardState[r][6]) {
+                            if (!isSquareAttacked(r, 5, oppColor) && !isSquareAttacked(r, 6, oppColor)) {
+                                moves.push({r: r, c: 6, isCastling: true});
+                            }
+                        }
+                        // Nhập thành xa (Queen side)
+                        if (!movedPieces.has(`${r},0`) && !boardState[r][1] && !boardState[r][2] && !boardState[r][3]) {
+                            if (!isSquareAttacked(r, 3, oppColor) && !isSquareAttacked(r, 2, oppColor)) {
+                                moves.push({r: r, c: 2, isCastling: true});
+                            }
+                        }
                     }
                 }
             }
@@ -294,13 +345,7 @@
             }
             if(!kingPos) return null;
             const oppColor = color === 'w' ? 'b' : 'w';
-            for(let r=0; r<8; r++) {
-                for(let c=0; c<8; c++) {
-                    if(boardState[r][c] && boardState[r][c][0] === oppColor) {
-                        if(getPseudoLegalMoves(r, c).some(m => m.r === kingPos.r && m.c === kingPos.c)) return kingPos;
-                    }
-                }
-            }
+            if (isSquareAttacked(kingPos.r, kingPos.c, oppColor)) return kingPos;
             return null;
         }
 
@@ -360,8 +405,9 @@
                 if (square) {
                     const tr = parseInt(square.dataset.row);
                     const tc = parseInt(square.dataset.col);
-                    if (legalMoves.some(m => m.r === tr && m.c === tc)) {
-                        movePiece(r, c, tr, tc);
+                    const move = legalMoves.find(m => m.r === tr && m.c === tc);
+                    if (move) {
+                        movePiece(r, c, tr, tc, move);
                     }
                 }
                 document.onmouseup = null;
@@ -374,8 +420,9 @@
         }
 
         function handleSquareClick(r, c) {
-            if (selectedSquare && legalMoves.some(m => m.r === r && m.c === c)) {
-                movePiece(selectedSquare[0], selectedSquare[1], r, c);
+            const move = legalMoves.find(m => m.r === r && m.c === c);
+            if (selectedSquare && move) {
+                movePiece(selectedSquare[0], selectedSquare[1], r, c, move);
             } else {
                 const piece = boardState[r][c];
                 if (piece && piece[0] === turn) {
@@ -389,21 +436,53 @@
             }
         }
 
-        function movePiece(fromR, fromC, toR, toC) {
+        function movePiece(fromR, fromC, toR, toC, moveInfo) {
+            // Lưu lịch sử
             history.push({ 
                 state: JSON.parse(JSON.stringify(boardState)), 
                 captured: JSON.parse(JSON.stringify(capturedPieces)),
                 turn: turn,
-                status: statusElement.innerText
+                status: statusElement.innerText,
+                lastMove: lastMove,
+                movedPieces: new Set(movedPieces)
             });
 
-            const piece = boardState[fromR][fromC];
-            const captured = boardState[toR][toC];
+            let piece = boardState[fromR][fromC];
+            let captured = boardState[toR][toC];
             
+            // Xử lý En Passant
+            if (moveInfo.isEnPassant) {
+                captured = boardState[fromR][toC];
+                boardState[fromR][toC] = null;
+            }
+
+            // Xử lý Nhập thành (Di chuyển Xe)
+            if (moveInfo.isCastling) {
+                if (toC === 6) { // Gần
+                    boardState[toR][5] = boardState[toR][7];
+                    boardState[toR][7] = null;
+                    movedPieces.add(`${toR},7`);
+                } else if (toC === 2) { // Xa
+                    boardState[toR][3] = boardState[toR][0];
+                    boardState[toR][0] = null;
+                    movedPieces.add(`${toR},0`);
+                }
+            }
+
+            // LUẬT: PHONG QUÂN (Promotion)
+            if (piece[1] === 'P' && (toR === 0 || toR === 7)) {
+                const choice = prompt("Phong quân: Q (Hậu), R (Xe), B (Tượng), N (Mã)", "Q") || "Q";
+                piece = piece[0] + (['Q','R','B','N'].includes(choice.toUpperCase()) ? choice.toUpperCase() : 'Q');
+            }
+
             if (captured) capturedPieces[captured[0]].push(captured);
 
             boardState[toR][toC] = piece;
             boardState[fromR][fromC] = null;
+            
+            // Đánh dấu quân đã di chuyển
+            movedPieces.add(`${fromR},${fromC}`);
+            lastMove = { piece, fromR, fromC, toR, toC };
 
             const logItem = document.createElement('div');
             logItem.innerText = `${pieceUnicode[piece]} (${fromR},${fromC}) → (${toR},${toC}) ${captured ? 'x' : ''}`;
@@ -439,11 +518,12 @@
         function undo() {
             if (history.length > 0) {
                 const last = history.pop();
-                
                 boardState = last.state;
                 capturedPieces = last.captured;
                 turn = last.turn;
                 statusElement.innerText = last.status;
+                lastMove = last.lastMove;
+                movedPieces = last.movedPieces;
 
                 if (historyElement.firstChild) {
                     historyElement.removeChild(historyElement.firstChild);
