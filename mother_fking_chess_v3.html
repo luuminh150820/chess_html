@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Mother Fking Chess - LAN</title>
+    <style>
+        /* Giữ nguyên toàn bộ CSS từ bản trước của bạn */
+        :root { --bg-color: #2c3e50; --square-light: #ecf0f1; --square-dark: #95a5a6; --highlight: #f1c40f; --legal-move: rgba(231, 76, 60, 0.3); --check-color: #e74c3c; }
+        body { font-family: sans-serif; background-color: var(--bg-color); display: flex; flex-direction: column; align-items: center; color: white; margin: 20px; touch-action: none; }
+        .setup-panel { background: #34495e; padding: 15px; border-radius: 8px; margin-bottom: 15px; display: flex; gap: 10px; align-items: center; }
+        input { padding: 8px; border-radius: 4px; border: none; width: 200px; }
+        #board { display: grid; grid-template-columns: repeat(8, 60px); grid-template-rows: repeat(8, 60px); border: 5px solid #34495e; position: relative; transition: transform 0.8s cubic-bezier(0.45, 0.05, 0.55, 0.95); }
+        #board.flipped { transform: rotate(180deg); }
+        .square { width: 60px; height: 60px; display: flex; align-items: center; justify-content: center; font-size: 40px; position: relative; transition: transform 0.8s cubic-bezier(0.45, 0.05, 0.55, 0.95); }
+        #board.flipped .square { transform: rotate(-180deg); }
+        @keyframes shrink-grow { 0% { scale: 1; } 50% { scale: 0.35; opacity: 0.7; } 100% { scale: 1; opacity: 1; } }
+        .flipping .square { animation: shrink-grow 0.8s ease-in-out; }
+        .light { background-color: var(--square-light); }
+        .dark { background-color: var(--square-dark); }
+        .selected { background-color: var(--highlight) !important; }
+        .check { background-color: var(--check-color) !important; }
+        .legal-move::after { content: ''; width: 20px; height: 20px; background-color: var(--legal-move); border-radius: 50%; position: absolute; }
+        .piece { cursor: grab; color: black; z-index: 2; }
+        .piece.dragging { cursor: grabbing; position: fixed; pointer-events: none; z-index: 1000; transform: translate(-50%, -50%) !important; transition: none !important; scale: 1.1 !important; }
+        .event-gif { position: absolute; width: 100%; height: 100%; top: 0; left: 0; z-index: 10; pointer-events: none; object-fit: cover; }
+        .game-container { display: flex; gap: 20px; flex-wrap: wrap; justify-content: center; }
+        .info-panel { width: 250px; background: #34495e; padding: 15px; border-radius: 8px; }
+        #history { height: 300px; overflow-y: auto; background: #2c3e50; padding: 5px; font-size: 14px; margin-top: 10px; }
+        .status { font-size: 1.2em; margin-bottom: 10px; text-align: center; }
+        .controls { margin-top: 20px; display: flex; gap: 10px; }
+        button { padding: 10px 20px; cursor: pointer; border: none; border-radius: 5px; background: #e67e22; color: white; font-weight: bold; }
+        .role-w { border: 3px solid white; }
+        .role-b { border: 3px solid black; }
+    </style>
+</head>
+<body>
+
+    <div class="setup-panel">
+        <input type="text" id="server-ip" placeholder="Nhập IP Server (VD: 10.2.3.4:8000)">
+        <button onclick="setRole('w')" id="btn-w">Tôi là TRẮNG</button>
+        <button onclick="setRole('b')" id="btn-b">Tôi là ĐEN</button>
+    </div>
+
+    <div class="status" id="status">Chọn quân để bắt đầu</div>
+
+    <div class="game-container">
+        <div class="board-wrapper">
+            <div id="captured-black" style="height:40px; display:flex; gap:2px; font-size:24px;"></div>
+            <div id="board"></div>
+            <div id="captured-white" style="height:40px; display:flex; gap:2px; font-size:24px;"></div>
+        </div>
+        <div class="info-panel">
+            <strong>Lịch sử:</strong>
+            <div id="history"></div>
+            <div class="controls">
+                <button onclick="undoOnline()">Hoàn tác</button>
+                <button onclick="toggleFlip()">Xoay bàn</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let myRole = null; 
+        let serverUrl = "";
+        let lastVersion = -1;
+
+        function setRole(role) {
+            const ip = document.getElementById('server-ip').value;
+            if(!ip) { alert("Nhập IP máy chạy server Python trước!"); return; }
+            serverUrl = ip.startsWith("http") ? ip : "http://" + ip;
+            myRole = role;
+            document.getElementById('btn-w').style.opacity = role === 'w' ? "1" : "0.5";
+            document.getElementById('btn-b').style.opacity = role === 'b' ? "1" : "0.5";
+            if(role === 'b' && !isFlipped) toggleFlip();
+            
+            // Bắt đầu vòng lặp lấy dữ liệu
+            startPolling();
+        }
+
+        async function startPolling() {
+            setInterval(async () => {
+                if(!serverUrl) return;
+                try {
+                    const res = await fetch(`${serverUrl}/get_game`);
+                    const data = await res.json();
+                    
+                    if (data.version > lastVersion) {
+                        // Nếu là lần đầu tiên (version 0) và mình là người Trắng, hãy khởi tạo server
+                        if (data.version === 0 && myRole === 'w' && boardState.length > 0) {
+                            syncGame();
+                            return;
+                        }
+                        
+                        if (data.boardState && data.boardState.length > 0) {
+                            boardState = data.boardState;
+                            capturedPieces = data.capturedPieces;
+                            turn = data.turn;
+                            history = data.history;
+                            statusElement.innerText = data.status;
+                            
+                            // Cập nhật log
+                            historyElement.innerHTML = '';
+                            data.historyLogs.forEach(log => {
+                                const div = document.createElement('div');
+                                div.innerText = log;
+                                historyElement.appendChild(div);
+                            });
+
+                            createBoard();
+                            
+                            // Hiệu ứng GIF nếu có nước đi mới từ đối thủ
+                            if (data.lastMove && turn === myRole) {
+                                if (data.isCapture) showGif(data.lastMove.toR, data.lastMove.toC, 'capture');
+                                if (data.checkPos) showGif(data.checkPos.r, data.checkPos.c, data.isMate ? 'mate' : 'check');
+                            }
+                        }
+                        lastVersion = data.version;
+                    }
+                } catch (e) { console.error("Lỗi kết nối server"); }
+            }, 800);
+        }
+
+        async function syncGame(lastMove = null, isCapture = false, checkPos = null, isMate = false) {
+            if (!serverUrl) return;
+            const logs = Array.from(historyElement.children).map(el => el.innerText);
+            const payload = {
+                boardState, capturedPieces, turn, history,
+                historyLogs: logs, status: statusElement.innerText,
+                lastMove, isCapture, checkPos, isMate, version: 0
+            };
+            await fetch(`${serverUrl}/update_game`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+            });
+        }
+
+        // --- GIỮ NGUYÊN LOGIC CỜ VUA CỦA BẠN ---
+        // (Copy toàn bộ phần logic: boardState, getLegalMoves, startDrag, movePiece... từ bản cũ vào đây)
+        // Lưu ý trong movePiece: gọi syncGame(...) ở cuối hàm.
+        // Lưu ý trong startDrag: thêm check if (turn !== myRole) return;
+        
+        const gifPaths = { capture: ['capture1.gif'], check: ['check1.gif'], mate: ['mate1.gif'] };
+        const boardElement = document.getElementById('board');
+        const statusElement = document.getElementById('status');
+        const historyElement = document.getElementById('history');
+        const capWhiteEl = document.getElementById('captured-white');
+        const capBlackEl = document.getElementById('captured-black');
+        
+        let boardState = [
+            ['bR', 'bN', 'bB', 'bQ', 'bK', 'bB', 'bN', 'bR'],
+            ['bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP', 'bP'],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            [null, null, null, null, null, null, null, null],
+            ['wP', 'wP', 'wP', 'wP', 'wP', 'wP', 'wP', 'wP'],
+            ['wR', 'wN', 'wB', 'wQ', 'wK', 'wB', 'wN', 'wR']
+        ];
+        const pieceUnicode = { 'bR': '♜', 'bN': '♞', 'bB': '♝', 'bQ': '♛', 'bK': '♚', 'bP': '♟', 'wR': '♖', 'wN': '♘', 'wB': '♗', 'wQ': '♕', 'wK': '♔', 'wP': '♙' };
+        let turn = 'w'; let history = []; let capturedPieces = { w: [], b: [] }; let isFlipped = false; let selectedSquare = null; let legalMoves = [];
+
+        function createBoard() {
+            boardElement.innerHTML = '';
+            const checkPos = getCheckPos(turn);
+            for (let r = 0; r < 8; r++) {
+                for (let c = 0; c < 8; c++) {
+                    const square = document.createElement('div');
+                    square.className = `square ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
+                    square.dataset.row = r; square.dataset.col = c;
+                    if (selectedSquare && selectedSquare[0] === r && selectedSquare[1] === c) square.classList.add('selected');
+                    if (legalMoves.some(m => m.r === r && m.c === c)) square.classList.add('legal-move');
+                    if (checkPos && checkPos.r === r && checkPos.c === c) square.classList.add('check');
+                    const piece = boardState[r][c];
+                    if (piece) {
+                        const pieceDiv = document.createElement('div');
+                        pieceDiv.className = 'piece';
+                        pieceDiv.innerText = pieceUnicode[piece];
+                        pieceDiv.onmousedown = (e) => startDrag(e, r, c);
+                        square.appendChild(pieceDiv);
+                    }
+                    square.onclick = () => handleSquareClick(r, c);
+                    boardElement.appendChild(square);
+                }
+            }
+            capWhiteEl.innerHTML = capturedPieces.w.map(p => `<span>${pieceUnicode[p]}</span>`).join('');
+            capBlackEl.innerHTML = capturedPieces.b.map(p => `<span>${pieceUnicode[p]}</span>`).join('');
+        }
+
+        // (Các hàm getPseudoLegalMoves, getLegalMoves, wouldBeInCheck, getCheckPos, isCheckmate giữ nguyên...)
+        function getPseudoLegalMoves(r, c) {
+            const piece = boardState[r][c];
+            if (!piece) return [];
+            const color = piece[0], type = piece[1], moves = [];
+            const directions = { 'R': [[0,1], [0,-1], [1,0], [-1,0]], 'B': [[1,1], [1,-1], [-1,1], [-1,-1]], 'Q': [[0,1], [0,-1], [1,0], [-1,0], [1,1], [1,-1], [-1,1], [-1,-1]], 'N': [[2,1], [2,-1], [-2,1], [-2,-1], [1,2], [1,-2], [-1,2], [-1,-2]], 'K': [[0,1], [0,-1], [1,0], [-1,0], [1,1], [1,-1], [-1,1], [-1,-1]] };
+            if (type === 'P') {
+                const dir = color === 'w' ? -1 : 1;
+                if (boardState[r+dir] && !boardState[r+dir][c]) { moves.push({r: r+dir, c: c}); if (((color === 'w' && r === 6) || (color === 'b' && r === 1)) && !boardState[r+2*dir][c]) moves.push({r: r+2*dir, c: c}); }
+                [1, -1].forEach(dc => { const target = boardState[r+dir] ? boardState[r+dir][c+dc] : null; if (target && target[0] !== color) moves.push({r: r+dir, c: c+dc}); });
+            } else if (directions[type]) {
+                for (let [dr, dc] of directions[type]) {
+                    let nr = r + dr, nc = c + dc;
+                    while (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
+                        const target = boardState[nr][nc];
+                        if (!target) { moves.push({r: nr, c: nc}); if (type === 'N' || type === 'K') break; }
+                        else { if (target[0] !== color) moves.push({r: nr, c: nc}); break; }
+                        nr += dr; nc += dc;
+                    }
+                }
+            }
+            return moves;
+        }
+        function getLegalMoves(r, c) { const pseudo = getPseudoLegalMoves(r, c); const color = boardState[r][c][0]; return pseudo.filter(m => !wouldBeInCheck(r, c, m.r, m.c, color)); }
+        function wouldBeInCheck(fromR, fromC, toR, toC, color) { const originalTo = boardState[toR][toC]; const originalFrom = boardState[fromR][fromC]; boardState[toR][toC] = originalFrom; boardState[fromR][fromC] = null; const inCheck = !!getCheckPos(color); boardState[fromR][fromC] = originalFrom; boardState[toR][toC] = originalTo; return inCheck; }
+        function getCheckPos(color) {
+            let kingPos = null;
+            for(let r=0; r<8; r++) { for(let c=0; c<8; c++) if(boardState[r][c] === color + 'K') kingPos = {r, c}; }
+            if(!kingPos) return null;
+            const oppColor = color === 'w' ? 'b' : 'w';
+            for(let r=0; r<8; r++) { for(let c=0; c<8; c++) { if(boardState[r][c] && boardState[r][c][0] === oppColor) { if(getPseudoLegalMoves(r, c).some(m => m.r === kingPos.r && m.c === kingPos.c)) return kingPos; } } }
+            return null;
+        }
+        function isCheckmate(color) { if (!getCheckPos(color)) return false; for (let r = 0; r < 8; r++) { for (let c = 0; c < 8; c++) { if (boardState[r][c] && boardState[r][c][0] === color) { if (getLegalMoves(r, c).length > 0) return false; } } } return true; }
+        function showGif(r, c, type) {
+            const square = document.querySelector(`[data-row="${r}"][data-col="${c}"]`); if (!square) return;
+            const img = document.createElement('img'); img.src = gifPaths[type][0] + "?t=" + new Date().getTime(); img.className = 'event-gif';
+            square.appendChild(img); setTimeout(() => img.remove(), 2000);
+        }
+
+        function startDrag(e, r, c) {
+            if (myRole && turn !== myRole) return;
+            if (boardState[r][c][0] !== turn) return;
+            e.stopPropagation(); selectedSquare = [r, c]; legalMoves = getLegalMoves(r, c); createBoard();
+            const pieceEl = e.target; const draggingPiece = pieceEl.cloneNode(true); draggingPiece.classList.add('dragging'); document.body.appendChild(draggingPiece);
+            const moveAt = (px, py) => { draggingPiece.style.left = px + 'px'; draggingPiece.style.top = py + 'px'; };
+            moveAt(e.clientX, e.clientY);
+            const onMouseMove = (ev) => moveAt(ev.clientX, ev.clientY);
+            document.addEventListener('mousemove', onMouseMove);
+            document.onmouseup = (ev) => {
+                document.removeEventListener('mousemove', onMouseMove); draggingPiece.remove();
+                const targetEl = document.elementFromPoint(ev.clientX, ev.clientY); const square = targetEl?.closest('.square');
+                if (square) { const tr = parseInt(square.dataset.row); const tc = parseInt(square.dataset.col); if (legalMoves.some(m => m.r === tr && m.c === tc)) movePiece(r, c, tr, tc); }
+                document.onmouseup = null; if (!square) { selectedSquare = null; legalMoves = []; createBoard(); }
+            };
+        }
+
+        function handleSquareClick(r, c) {
+            if (myRole && turn !== myRole) return;
+            if (selectedSquare && legalMoves.some(m => m.r === r && m.c === c)) { movePiece(selectedSquare[0], selectedSquare[1], r, c); } 
+            else { const piece = boardState[r][c]; if (piece && piece[0] === turn) { selectedSquare = [r, c]; legalMoves = getLegalMoves(r, c); } else { selectedSquare = null; legalMoves = []; } createBoard(); }
+        }
+
+        function movePiece(fromR, fromC, toR, toC) {
+            history.push({ state: JSON.parse(JSON.stringify(boardState)), captured: JSON.parse(JSON.stringify(capturedPieces)), turn: turn, status: statusElement.innerText });
+            const piece = boardState[fromR][fromC]; const captured = boardState[toR][toC];
+            if (captured) capturedPieces[captured[0]].push(captured);
+            boardState[toR][toC] = piece; boardState[fromR][fromC] = null;
+            const logItem = document.createElement('div'); logItem.innerText = `${pieceUnicode[piece]} (${fromR},${fromC}) → (${toR},${toC}) ${captured ? 'x' : ''}`; historyElement.prepend(logItem);
+            turn = turn === 'w' ? 'b' : 'w';
+            const kingPos = getCheckPos(turn); const isMate = kingPos ? isCheckmate(turn) : false;
+            selectedSquare = null; legalMoves = []; createBoard();
+            if (captured) showGif(toR, toC, 'capture');
+            if (kingPos) {
+                if (isMate) { statusElement.innerText = `CHIẾU HẾT! ${turn === 'w' ? 'ĐEN' : 'TRẮNG'} THẮNG`; showGif(kingPos.r, kingPos.c, 'mate'); }
+                else { statusElement.innerText = `CHIẾU TƯỚNG! Lượt: ${turn === 'w' ? 'TRẮNG' : 'ĐEN'}`; showGif(kingPos.r, kingPos.c, 'check'); }
+            } else { statusElement.innerText = `Lượt đi: ${turn === 'w' ? 'TRẮNG' : 'ĐEN'}`; }
+            
+            syncGame({fromR, fromC, toR, toC}, !!captured, kingPos, isMate);
+        }
+
+        function undoOnline() {
+            if (myRole && turn !== myRole) return;
+            if (history.length > 0) {
+                const last = history.pop();
+                boardState = last.state; capturedPieces = last.captured; turn = last.turn; statusElement.innerText = last.status;
+                if (historyElement.firstChild) historyElement.removeChild(historyElement.firstChild);
+                createBoard();
+                syncGame();
+            }
+        }
+
+        function toggleFlip() { isFlipped = !isFlipped; boardElement.classList.add('flipping'); boardElement.classList.toggle('flipped', isFlipped); setTimeout(() => boardElement.classList.remove('flipping'), 800); }
+        createBoard();
+    </script>
+</body>
+</html>
