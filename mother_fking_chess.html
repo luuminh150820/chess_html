@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mother Fking Chess - Full Rules</title>
+    <title>Mother Fking Chess - Offline VipPro</title>
     <style>
         :root {
             --bg-color: #2c3e50;
@@ -12,6 +12,7 @@
             --highlight: #f1c40f;
             --legal-move: rgba(231, 76, 60, 0.3);
             --check-color: #e74c3c;
+            --arrow-color: rgba(230, 126, 34, 0.7);
         }
 
         body {
@@ -23,20 +24,75 @@
             color: white;
             margin: 20px;
             touch-action: none;
+            filter: brightness(0.1);
         }
 
         .game-container {
             display: flex;
-            gap: 20px;
+            gap: 15px;
             flex-wrap: wrap;
             justify-content: center;
             align-items: flex-start;
         }
 
+        /* THANH ĐÁNH GIÁ (EVAL BAR) */
+        .eval-container {
+            width: 30px;
+            height: 530px; /* Khớp với chiều cao bàn cờ */
+            background: #444;
+            border: 3px solid #34495e;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-radius: 4px;
+        }
+        #eval-black {
+            width: 100%;
+            height: 50%;
+            background: #444;
+            transition: height 0.5s ease;
+        }
+        #eval-white {
+            width: 100%;
+            flex-grow: 1;
+            background: #eee;
+        }
+        #eval-score {
+            position: absolute;
+            width: 100%;
+            text-align: center;
+            font-size: 10px;
+            font-weight: bold;
+            color: #f1c40f;
+            bottom: 5px;
+            z-index: 5;
+            text-shadow: 1px 1px 2px black;
+        }
+        .eval-container.flipped { flex-direction: column-reverse; }
+
+        /* CSS CHO POPUP MENU */
+        #game-modal {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.9); z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .modal-content {
+            background: #34495e; padding: 40px; border-radius: 15px;
+            text-align: center; border: 2px solid #f1c40f;
+            box-shadow: 0 0 20px rgba(241, 196, 15, 0.3);
+        }
+        .modal-content h1 { color: #f1c40f; margin-top: 0; }
+        .modal-content button {
+            display: block; width: 100%; margin: 10px 0; padding: 15px;
+            font-size: 18px; text-align: left;
+        }
+
         .board-wrapper {
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 5px;
+            position: relative;
         }
 
         #board {
@@ -50,19 +106,13 @@
         }
 
         #board.flipped { transform: rotate(180deg); }
-
         .square {
-            width: 60px;
-            height: 60px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 40px;
-            position: relative;
+            width: 60px; height: 60px;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; position: relative;
             transition: transform 0.8s cubic-bezier(0.45, 0.05, 0.55, 0.95);
             scale: 1;
         }
-
         #board.flipped .square { transform: rotate(-180deg); }
 
         @keyframes shrink-grow {
@@ -70,104 +120,238 @@
             50% { scale: 0.35; opacity: 0.7; }
             100% { scale: 1; opacity: 1; }
         }
-
         .flipping .square { animation: shrink-grow 0.8s ease-in-out; }
 
         .light { background-color: var(--square-light); }
         .dark { background-color: var(--square-dark); }
         .selected { background-color: var(--highlight) !important; }
         .check { background-color: var(--check-color) !important; }
+        .last-move { background-color: rgba(241, 196, 15, 0.4) !important; }
 
         .legal-move::after {
-            content: '';
-            width: 20px;
-            height: 20px;
+            content: ''; width: 20px; height: 20px;
             background-color: var(--legal-move);
-            border-radius: 50%;
-            position: absolute;
+            border-radius: 50%; position: absolute;
         }
 
         .piece { cursor: grab; color: black; z-index: 2; }
-
         .piece.dragging {
-            cursor: grabbing;
-            position: fixed;
-            pointer-events: none;
-            z-index: 1000;
-            transform: translate(-50%, -50%) !important;
-            transition: none !important;
-            scale: 2.5 !important;
+            cursor: grabbing; position: fixed; pointer-events: none;
+            z-index: 1000; transform: translate(-50%, -50%) !important;
+            transition: none !important; scale: 2.5 !important;
         }
 
-        .event-gif {
-            position: absolute;
-            width: 100%;
-            height: 100%;
-            top: 0;
-            left: 0;
-            z-index: 10;
-            pointer-events: none;
-            object-fit: cover;
-        }
+        #arrow-svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .event-gif { position: absolute; width: 100%; height: 100%; top: 0; left: 0; z-index: 11; pointer-events: none; object-fit: cover; }
 
-        .captured-area {
-            height: 40px;
-            display: flex;
-            align-items: center;
-            gap: 2px;
-            font-size: 24px;
-            background: rgba(0,0,0,0.2);
-            padding: 0 10px;
-            border-radius: 4px;
-        }
-
-        .info-panel {
-            width: 250px;
-            background: #34495e;
-            padding: 15px;
-            border-radius: 8px;
-        }
-
-        #history {
-            height: 300px;
-            overflow-y: auto;
-            background: #2c3e50;
-            padding: 5px;
-            font-size: 14px;
-            margin-top: 10px;
-        }
-
+        .captured-area { height: 35px; display: flex; align-items: center; gap: 2px; font-size: 24px; background: rgba(0,0,0,0.2); padding: 0 10px; border-radius: 4px; min-width: 480px; }
+        .info-panel { width: 250px; background: #34495e; padding: 15px; border-radius: 8px; }
+        #history { height: 250px; overflow-y: auto; background: #2c3e50; padding: 5px; font-size: 14px; margin-top: 10px; border: 1px solid #444; }
         .status { font-size: 1.2em; margin-bottom: 10px; text-align: center; }
-        .controls { margin-top: 20px; display: flex; gap: 10px; }
-        button {
-            padding: 10px 20px; cursor: pointer; border: none;
-            border-radius: 5px; background: #e67e22; color: white; font-weight: bold;
-        }
+        .controls { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+        .btn-group { display: flex; gap: 5px; }
+        button { padding: 10px; cursor: pointer; border: none; border-radius: 5px; background: #e67e22; color: white; font-weight: bold; flex: 1; }
         button:hover { background: #d35400; }
     </style>
 </head>
 <body>
+    <div id="game-modal">
+        <div class="modal-content">
+            <h1>MOTHER FKING CHESS</h1>
+            <p>Start:</p>
+            <button onclick="startGame(0)"> PvP</button>
+            <button onclick="startGame(1)"> Monke vs AI (Easy)</button>
+            <button onclick="startGame(2)"> Monke vs AI (💀)</button>
+        </div>
+    </div>
 
     <div class="status" id="status">Lượt đi: TRẮNG</div>
 
     <div class="game-container">
+        <!-- THANH ĐÁNH GIÁ -->
+        <div class="eval-container">
+            <div id="eval-black"></div>
+            <div id="eval-white"></div>
+            <div id="eval-score">0.0</div>
+        </div>
+
         <div class="board-wrapper">
             <div id="captured-black" class="captured-area"></div>
-            <div id="board"></div>
+            <div id="board">
+                <svg id="arrow-svg">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="4" markerHeight="4" refX="3" refY="2" orient="auto">
+                            <polygon points="0 0, 4 2, 0 4" fill="rgba(230, 126, 34, 0.8)" />
+                        </marker>
+                    </defs>
+                </svg>
+            </div>
             <div id="captured-white" class="captured-area"></div>
         </div>
 
         <div class="info-panel">
-            <strong>Lịch sử nước đi:</strong>
             <div id="history"></div>
             <div class="controls">
-                <button onclick="undo()">Hoàn tác</button>
-                <button onclick="toggleFlip()">Xoay bàn</button>
+                <div class="btn-group">
+                    <button onclick="undo()">Hoàn tác</button>
+                    <button onclick="toggleFlip()">Xoay bàn</button>
+                </div>
             </div>
         </div>
     </div>
 
     <script>
+        // --- CẤU HÌNH STOCKFISH ---
+        const blob = new Blob(["importScripts('https://cdnjs.cloudflare.com/ajax/libs/stockfish.js/10.0.2/stockfish.js');"], {type: 'application/javascript'});
+        const stockfishUrl = window.URL.createObjectURL(blob);
+        const stockfish = new Worker(stockfishUrl);
+        let currentMode = 0; // 0: PvP, 1: Easy, 2: Hard
+        
+        stockfish.onmessage = function(e) {
+            const msg = e.data;
+            
+            // --- LOGIC EVAL BAR MỚI (Lọc nhiễu + Sửa phối cảnh) ---
+            let currentDepth = 0;
+            if (msg.includes('depth')) {
+                const parts = msg.split(' ');
+                const depthIdx = parts.indexOf('depth');
+                if (depthIdx !== -1) currentDepth = parseInt(parts[depthIdx + 1]);
+            }
+
+            if (msg.includes('score cp')) {
+                if (currentDepth < 8) return; // Lọc nhiễu depth thấp
+
+                let cp = parseInt(msg.split('score cp ')[1]);
+                // Đảo dấu nếu là lượt Đen (Stockfish trả điểm theo phe đi)
+                if (turn === 'b') cp = -cp;
+                updateEvalBar(cp);
+
+            } else if (msg.includes('score mate')) {
+                let mate = parseInt(msg.split('score mate ')[1]);
+                if (turn === 'b') mate = -mate;
+                updateEvalBar(mate > 0 ? 10000 : -10000);
+            }
+
+            // Xử lý nước đi của AI
+            if (msg.includes('bestmove')) {
+                const moveStr = msg.split('bestmove ')[1].split(' ')[0];
+                const level = currentMode;
+                if (gameStarted && level !== 0 && moveStr !== '(none)') {
+                    if (turn === 'b') { //mặc định AI Đen
+                        makeAIMove(moveStr);
+                    }
+                }
+            }
+        };
+
+        let gameStarted = false; 
+
+        function startGame(mode) {
+            currentMode = mode;
+            document.getElementById('game-modal').style.display = 'none';
+            gameStarted = true;
+            
+            stockfish.postMessage(`position fen ${getFEN()}`);
+            stockfish.postMessage('go depth 10');
+            
+            printBoardToConsole(); // In bàn cờ lúc bắt đầu
+        }
+
+        function updateEvalBar(cp) {
+            // Giới hạn điểm để tránh vỡ giao diện
+            const clampedCp = Math.max(-1000, Math.min(1000, cp));
+            const score = clampedCp / 100;
+            
+            let percentage = 50 - (score * 5); 
+            percentage = Math.max(5, Math.min(95, percentage));
+            
+            document.getElementById('eval-black').style.height = percentage + '%';
+            
+            const scoreEl = document.getElementById('eval-score');
+            scoreEl.innerText = Math.abs(score).toFixed(1);
+            
+            // Chỉnh vị trí số điểm
+            if (score >= 0) { // Trắng ưu
+                scoreEl.style.bottom = "5px"; scoreEl.style.top = "auto"; scoreEl.style.color = "#333";
+            } else { // Đen ưu
+                scoreEl.style.top = "5px"; scoreEl.style.bottom = "auto"; scoreEl.style.color = "#fff";
+            }
+        }
+
+        function getFEN() {
+            let fen = "";
+            for (let r = 0; r < 8; r++) {
+                let empty = 0;
+                for (let c = 0; c < 8; c++) {
+                    const p = boardState[r][c];
+                    if (!p) empty++;
+                    else {
+                        if (empty > 0) { fen += empty; empty = 0; }
+                        let char = p[1];
+                        if (char === 'N') char = 'n'; // Mã
+                        if (p[0] === 'w') fen += char.toUpperCase();
+                        else fen += char.toLowerCase();
+                    }
+                }
+                if (empty > 0) fen += empty;
+                if (r < 7) fen += "/";
+            }
+            fen += ` ${turn} `;
+            // Castling rights (đơn giản hóa)
+            let castling = "";
+            if (!movedPieces.has("7,4")) {
+                if (!movedPieces.has("7,7")) castling += "K";
+                if (!movedPieces.has("7,0")) castling += "Q";
+            }
+            if (!movedPieces.has("0,4")) {
+                if (!movedPieces.has("0,7")) castling += "k";
+                if (!movedPieces.has("0,0")) castling += "q";
+            }
+            fen += (castling || "-") + " - 0 1";
+            return fen;
+        }
+
+        function askAI() {
+            const level = currentMode;
+            if (level == 0) return;
+            
+            const depth = level === 1 ? 5 : 12; // Level 1: depth 5, Level 2: depth 12
+            stockfish.postMessage(`position fen ${getFEN()}`);
+            stockfish.postMessage(`go depth ${depth}`);
+        }
+
+        function makeAIMove(moveStr) {
+            const fromCol = moveStr.charCodeAt(0) - 97;
+            const fromRow = 8 - parseInt(moveStr[1]);
+            const toCol = moveStr.charCodeAt(2) - 97;
+            const toRow = 8 - parseInt(moveStr[3]);
+            
+            const move = getLegalMoves(fromRow, fromCol).find(m => m.r === toRow && m.c === toCol);
+            if (move) movePiece(fromRow, fromCol, toRow, toCol, move);
+        }
+
+        // --- STEALTH MODE: CONSOLE PRINT (Đã sửa cho Offline) ---
+        function printBoardToConsole() {
+            if (!boardState || boardState.length === 0) return;
+            console.clear();
+            console.log("%c [OFFLINE_CHESS_LOG] - Session: " + new Date().toLocaleTimeString(), "color: #555; font-size: 10px;");
+            let output = "    a   b   c   d   e   f   g   h\n";
+            for (let r = 0; r < 8; r++) {
+                let rowText = (8 - r) + " | ";
+                for (let c = 0; c < 8; c++) {
+                    const piece = boardState[r][c];
+                    // Offline dùng null cho ô trống, Online dùng 'e'
+                    // Sửa logic hiển thị tại đây:
+                    rowText += (piece === null ? "　" : pieceUnicode[piece]) + " | ";
+                }
+                output += rowText + (8 - r) + "\n";
+            }
+            output += "    a   b   c   d   e   f   g   h";
+            console.log("%c" + output, "font-family: 'Courier New', monospace; font-size: 12px; color: #2c3e50; background: #ecf0f1; padding: 5px;");
+            const turnText = turn === 'w' ? "TRẮNG" : "ĐEN";
+            console.log(`%c Lượt: ${turnText}`, `color: #e67e22; font-weight: bold; font-size: 14px;`);
+        }
+
         const gifPaths = {
             capture: ['capture1.gif', 'capture2.gif', 'capture3.gif', 'capture4.gif'], 
             check: ['check1.gif', 'check2.gif'],    
@@ -175,6 +359,7 @@
         };
 
         const boardElement = document.getElementById('board');
+        const arrowSvg = document.getElementById('arrow-svg');
         const statusElement = document.getElementById('status');
         const historyElement = document.getElementById('history');
         const capWhiteEl = document.getElementById('captured-white');
@@ -202,22 +387,24 @@
         let isFlipped = false;
         let selectedSquare = null;
         let legalMoves = [];
-        
-        // Biến hỗ trợ luật đặc biệt
-        let lastMove = null; // Lưu nước đi cuối để tính En Passant
-        let movedPieces = new Set(); // Lưu các quân đã từng di chuyển (Vua, Xe) để tính Nhập thành
+        let lastMove = null; 
+        let movedPieces = new Set(); 
+        let arrows = [];
+        let rightClickStart = null;
 
         function createBoard() {
-            boardElement.innerHTML = '';
+            boardElement.querySelectorAll('.square').forEach(s => s.remove());
             const checkPos = getCheckPos(turn);
 
             for (let r = 0; r < 8; r++) {
                 for (let c = 0; c < 8; c++) {
                     const square = document.createElement('div');
                     square.className = `square ${(r + c) % 2 === 0 ? 'light' : 'dark'}`;
-                    square.dataset.row = r;
-                    square.dataset.col = c;
+                    square.dataset.row = r; square.dataset.col = c;
                     
+                    if (lastMove && ((lastMove.fromR === r && lastMove.fromC === c) || (lastMove.toR === r && lastMove.toC === c))) {
+                        square.classList.add('last-move');
+                    }
                     if (selectedSquare && selectedSquare[0] === r && selectedSquare[1] === c) square.classList.add('selected');
                     if (legalMoves.some(m => m.r === r && m.c === c)) square.classList.add('legal-move');
                     if (checkPos && checkPos.r === r && checkPos.c === c) square.classList.add('check');
@@ -227,18 +414,21 @@
                         const pieceDiv = document.createElement('div');
                         pieceDiv.className = 'piece';
                         pieceDiv.innerText = pieceUnicode[piece];
-                        pieceDiv.onmousedown = (e) => startDrag(e, r, c);
+                        pieceDiv.onmousedown = (e) => { if(e.button === 0) startDrag(e, r, c); };
                         square.appendChild(pieceDiv);
                     }
-
-                    square.onclick = () => handleSquareClick(r, c);
+                    square.onclick = () => { arrows = []; drawArrows(); handleSquareClick(r, c); };
                     boardElement.appendChild(square);
                 }
             }
             updateCapturedUI();
+            
+            // Cập nhật Eval Bar sau khi vẽ bàn cờ
+            stockfish.postMessage(`position fen ${getFEN()}`);
+            stockfish.postMessage('go depth 10');
         }
 
-        // Kiểm tra xem một ô có đang bị tấn công bởi màu đối phương không
+        // --- GIỮ NGUYÊN CÁC HÀM LOGIC CỦA BẠN ---
         function isSquareAttacked(r, c, attackerColor) {
             for (let i = 0; i < 8; i++) {
                 for (let j = 0; j < 8; j++) {
@@ -263,57 +453,35 @@
                 'N': [[2,1], [2,-1], [-2,1], [-2,-1], [1,2], [1,-2], [-1,2], [-1,-2]],
                 'K': [[0,1], [0,-1], [1,0], [-1,0], [1,1], [1,-1], [-1,1], [-1,-1]]
             };
-
             if (type === 'P') {
                 const dir = color === 'w' ? -1 : 1;
-                // Đi thẳng
                 if (boardState[r+dir] && !boardState[r+dir][c]) {
                     moves.push({r: r+dir, c: c});
-                    if (((color === 'w' && r === 6) || (color === 'b' && r === 1)) && !boardState[r+2*dir][c]) {
-                        moves.push({r: r+2*dir, c: c});
-                    }
+                    if (((color === 'w' && r === 6) || (color === 'b' && r === 1)) && !boardState[r+2*dir][c]) moves.push({r: r+2*dir, c: c});
                 }
-                // Ăn chéo
                 [1, -1].forEach(dc => {
                     const target = boardState[r+dir] ? boardState[r+dir][c+dc] : null;
                     if (target && target[0] !== color) moves.push({r: r+dir, c: c+dc});
-                    
-                    // LUẬT: EN PASSANT (Bắt tốt qua đường)
-                    if (!target && lastMove && lastMove.piece[1] === 'P' && lastMove.toR === r && lastMove.toC === c+dc && Math.abs(lastMove.fromR - lastMove.toR) === 2) {
-                        moves.push({r: r+dir, c: c+dc, isEnPassant: true});
-                    }
+                    if (!target && lastMove && lastMove.piece[1] === 'P' && lastMove.toR === r && lastMove.toC === c+dc && Math.abs(lastMove.fromR - lastMove.toR) === 2) moves.push({r: r+dir, c: c+dc, isEnPassant: true});
                 });
             } else if (directions[type]) {
                 for (let [dr, dc] of directions[type]) {
                     let nr = r + dr, nc = c + dc;
                     while (nr >= 0 && nr < 8 && nc >= 0 && nc < 8) {
                         const target = boardState[nr][nc];
-                        if (!target) { 
-                            moves.push({r: nr, c: nc}); 
-                            if (type === 'N' || type === 'K') break; 
-                        } else { 
-                            if (target[0] !== color) moves.push({r: nr, c: nc}); 
-                            break; 
-                        }
+                        if (!target) { moves.push({r: nr, c: nc}); if (type === 'N' || type === 'K') break; }
+                        else { if (target[0] !== color) moves.push({r: nr, c: nc}); break; }
                         nr += dr; nc += dc;
                     }
                 }
-
-                // LUẬT: NHẬP THÀNH (Castling)
                 if (type === 'K' && !ignoreCastling && !movedPieces.has(`${r},${c}`)) {
                     const oppColor = color === 'w' ? 'b' : 'w';
-                    if (!getCheckPos(color)) { // Không được nhập thành khi đang bị chiếu
-                        // Nhập thành gần (King side)
+                    if (!getCheckPos(color)) {
                         if (!movedPieces.has(`${r},7`) && !boardState[r][5] && !boardState[r][6]) {
-                            if (!isSquareAttacked(r, 5, oppColor) && !isSquareAttacked(r, 6, oppColor)) {
-                                moves.push({r: r, c: 6, isCastling: true});
-                            }
+                            if (!isSquareAttacked(r, 5, oppColor) && !isSquareAttacked(r, 6, oppColor)) moves.push({r: r, c: 6, isCastling: true});
                         }
-                        // Nhập thành xa (Queen side)
                         if (!movedPieces.has(`${r},0`) && !boardState[r][1] && !boardState[r][2] && !boardState[r][3]) {
-                            if (!isSquareAttacked(r, 3, oppColor) && !isSquareAttacked(r, 2, oppColor)) {
-                                moves.push({r: r, c: 2, isCastling: true});
-                            }
+                            if (!isSquareAttacked(r, 3, oppColor) && !isSquareAttacked(r, 2, oppColor)) moves.push({r: r, c: 2, isCastling: true});
                         }
                     }
                 }
@@ -330,11 +498,9 @@
         function wouldBeInCheck(fromR, fromC, toR, toC, color) {
             const originalTo = boardState[toR][toC];
             const originalFrom = boardState[fromR][fromC];
-            boardState[toR][toC] = originalFrom;
-            boardState[fromR][fromC] = null;
+            boardState[toR][toC] = originalFrom; boardState[fromR][fromC] = null;
             const inCheck = !!getCheckPos(color);
-            boardState[fromR][fromC] = originalFrom;
-            boardState[toR][toC] = originalTo;
+            boardState[fromR][fromC] = originalFrom; boardState[toR][toC] = originalTo;
             return inCheck;
         }
 
@@ -364,126 +530,69 @@
         function showGif(r, c, type) {
             const square = document.querySelector(`[data-row="${r}"][data-col="${c}"]`);
             if (!square) return;
-            const paths = gifPaths[type];
-            const randomGif = paths[Math.floor(Math.random() * paths.length)];
-            
             const img = document.createElement('img');
-            img.src = randomGif + "?t=" + new Date().getTime(); 
-            img.className = 'event-gif';
-            square.appendChild(img);
+            img.src = gifPaths[type][Math.floor(Math.random()*gifPaths[type].length)] + "?t=" + new Date().getTime(); 
+            img.className = 'event-gif'; square.appendChild(img);
             setTimeout(() => img.remove(), 2000);
         }
 
         function startDrag(e, r, c) {
             if (boardState[r][c][0] !== turn) return;
-            e.stopPropagation();
-            selectedSquare = [r, c];
-            legalMoves = getLegalMoves(r, c);
-            createBoard();
-
-            const pieceEl = e.target;
-            const draggingPiece = pieceEl.cloneNode(true);
-            draggingPiece.classList.add('dragging');
-            document.body.appendChild(draggingPiece);
-            
-            const moveAt = (px, py) => {
-                draggingPiece.style.left = px + 'px';
-                draggingPiece.style.top = py + 'px';
-            };
+            e.stopPropagation(); selectedSquare = [r, c]; legalMoves = getLegalMoves(r, c); createBoard();
+            const pieceEl = e.target; const draggingPiece = pieceEl.cloneNode(true);
+            draggingPiece.classList.add('dragging'); document.body.appendChild(draggingPiece);
+            const moveAt = (px, py) => { draggingPiece.style.left = px + 'px'; draggingPiece.style.top = py + 'px'; };
             moveAt(e.clientX, e.clientY);
-
             const onMouseMove = (ev) => moveAt(ev.clientX, ev.clientY);
             document.addEventListener('mousemove', onMouseMove);
-
             document.onmouseup = (ev) => {
-                document.removeEventListener('mousemove', onMouseMove);
-                draggingPiece.remove();
-                
+                document.removeEventListener('mousemove', onMouseMove); draggingPiece.remove();
                 const targetEl = document.elementFromPoint(ev.clientX, ev.clientY);
                 const square = targetEl?.closest('.square');
-                
                 if (square) {
-                    const tr = parseInt(square.dataset.row);
-                    const tc = parseInt(square.dataset.col);
+                    const tr = parseInt(square.dataset.row); const tc = parseInt(square.dataset.col);
                     const move = legalMoves.find(m => m.r === tr && m.c === tc);
-                    if (move) {
-                        movePiece(r, c, tr, tc, move);
-                    }
+                    if (move) movePiece(r, c, tr, tc, move);
                 }
-                document.onmouseup = null;
-                if (!square) {
-                    selectedSquare = null;
-                    legalMoves = [];
-                    createBoard();
-                }
+                document.onmouseup = null; if (!square) { selectedSquare = null; legalMoves = []; createBoard(); }
             };
         }
 
         function handleSquareClick(r, c) {
             const move = legalMoves.find(m => m.r === r && m.c === c);
-            if (selectedSquare && move) {
-                movePiece(selectedSquare[0], selectedSquare[1], r, c, move);
-            } else {
+            if (selectedSquare && move) movePiece(selectedSquare[0], selectedSquare[1], r, c, move);
+            else {
                 const piece = boardState[r][c];
-                if (piece && piece[0] === turn) {
-                    selectedSquare = [r, c];
-                    legalMoves = getLegalMoves(r, c);
-                } else {
-                    selectedSquare = null;
-                    legalMoves = [];
-                }
+                if (piece && piece[0] === turn) { selectedSquare = [r, c]; legalMoves = getLegalMoves(r, c); }
+                else { selectedSquare = null; legalMoves = []; }
                 createBoard();
             }
         }
 
         function movePiece(fromR, fromC, toR, toC, moveInfo) {
-            // Lưu lịch sử
             history.push({ 
-                state: JSON.parse(JSON.stringify(boardState)), 
-                captured: JSON.parse(JSON.stringify(capturedPieces)),
-                turn: turn,
-                status: statusElement.innerText,
-                lastMove: lastMove,
-                movedPieces: new Set(movedPieces)
+                state: JSON.parse(JSON.stringify(boardState)), captured: JSON.parse(JSON.stringify(capturedPieces)),
+                turn: turn, status: statusElement.innerText, lastMove: lastMove, movedPieces: new Set(movedPieces)
             });
 
             let piece = boardState[fromR][fromC];
             let captured = boardState[toR][toC];
-            
-            // Xử lý En Passant
-            if (moveInfo.isEnPassant) {
-                captured = boardState[fromR][toC];
-                boardState[fromR][toC] = null;
-            }
-
-            // Xử lý Nhập thành (Di chuyển Xe)
+            if (moveInfo.isEnPassant) { captured = boardState[fromR][toC]; boardState[fromR][toC] = null; }
             if (moveInfo.isCastling) {
-                if (toC === 6) { // Gần
-                    boardState[toR][5] = boardState[toR][7];
-                    boardState[toR][7] = null;
-                    movedPieces.add(`${toR},7`);
-                } else if (toC === 2) { // Xa
-                    boardState[toR][3] = boardState[toR][0];
-                    boardState[toR][0] = null;
-                    movedPieces.add(`${toR},0`);
-                }
+                if (toC === 6) { boardState[toR][5] = boardState[toR][7]; boardState[toR][7] = null; movedPieces.add(`${toR},7`); }
+                else if (toC === 2) { boardState[toR][3] = boardState[toR][0]; boardState[toR][0] = null; movedPieces.add(`${toR},0`); }
             }
-
-            // LUẬT: PHONG QUÂN (Promotion)
             if (piece[1] === 'P' && (toR === 0 || toR === 7)) {
-                const choice = prompt("Phong quân: Q (Hậu), R (Xe), B (Tượng), N (Mã)", "Q") || "Q";
-                piece = piece[0] + (['Q','R','B','N'].includes(choice.toUpperCase()) ? choice.toUpperCase() : 'Q');
+                // Nếu là AI đi thì mặc định phong Hậu, nếu người đi thì hỏi
+                const level = currentMode;
+                let choice = "Q";
+                if (level === 0 || turn === 'w') choice = prompt("Phong quân: Q, R, B, N", "Q") || "Q";
+                piece = piece[0] + choice.toUpperCase();
             }
-
             if (captured) capturedPieces[captured[0]].push(captured);
-
-            boardState[toR][toC] = piece;
-            boardState[fromR][fromC] = null;
+            boardState[toR][toC] = piece; boardState[fromR][fromC] = null;
+            movedPieces.add(`${fromR},${fromC}`); lastMove = { piece, fromR, fromC, toR, toC };
             
-            // Đánh dấu quân đã di chuyển
-            movedPieces.add(`${fromR},${fromC}`);
-            lastMove = { piece, fromR, fromC, toR, toC };
-
             const logItem = document.createElement('div');
             logItem.innerText = `${pieceUnicode[piece]} (${fromR},${fromC}) → (${toR},${toC}) ${captured ? 'x' : ''}`;
             historyElement.prepend(logItem);
@@ -491,23 +600,18 @@
             turn = turn === 'w' ? 'b' : 'w';
             const kingPos = getCheckPos(turn);
             const isMate = kingPos ? isCheckmate(turn) : false;
-
-            selectedSquare = null;
-            legalMoves = [];
+            selectedSquare = null; legalMoves = []; arrows = []; drawArrows();
             createBoard(); 
+            printBoardToConsole(); // In bàn cờ sau khi đi
 
             if (captured) showGif(toR, toC, 'capture');
             if (kingPos) {
-                if (isMate) {
-                    statusElement.innerText = `CHIẾU HẾT! ${turn === 'w' ? 'ĐEN' : 'TRẮNG'} THẮNG`;
-                    showGif(kingPos.r, kingPos.c, 'mate');
-                } else {
-                    statusElement.innerText = `CHIẾU TƯỚNG! Lượt: ${turn === 'w' ? 'TRẮNG' : 'ĐEN'}`;
-                    showGif(kingPos.r, kingPos.c, 'check');
-                }
-            } else {
-                statusElement.innerText = `Lượt đi: ${turn === 'w' ? 'TRẮNG' : 'ĐEN'}`;
-            }
+                if (isMate) { statusElement.innerText = `CHIẾU HẾT! ${turn === 'w' ? 'ĐEN' : 'TRẮNG'} THẮNG`; showGif(kingPos.r, kingPos.c, 'mate'); }
+                else { statusElement.innerText = `CHIẾU TƯỚNG! Lượt: ${turn === 'w' ? 'TRẮNG' : 'ĐEN'}`; showGif(kingPos.r, kingPos.c, 'check'); }
+            } else { statusElement.innerText = `Lượt đi: ${turn === 'w' ? 'TRẮNG' : 'ĐEN'}`; }
+
+            // Nếu đến lượt AI thì gọi AI
+            if (!isMate) setTimeout(askAI, 500);
         }
 
         function updateCapturedUI() {
@@ -517,21 +621,24 @@
 
         function undo() {
             if (history.length > 0) {
-                const last = history.pop();
-                boardState = last.state;
-                capturedPieces = last.captured;
-                turn = last.turn;
-                statusElement.innerText = last.status;
-                lastMove = last.lastMove;
-                movedPieces = last.movedPieces;
-
-                if (historyElement.firstChild) {
-                    historyElement.removeChild(historyElement.firstChild);
+                const last  = history.pop();
+                
+                if (currentMode === 0){
+                    boardState = last.state; capturedPieces = last.captured; turn = last.turn;
+                    statusElement.innerText = last.status; lastMove = last.lastMove; movedPieces = last.movedPieces;
+                    if (historyElement.firstChild) historyElement.removeChild(historyElement.firstChild);
                 }
-
-                selectedSquare = null;
-                legalMoves = [];
+                else {
+                    const last1 = history.pop();
+                    boardState = last1.state; capturedPieces = last1.captured; turn = last1.turn;
+                    statusElement.innerText = last1.status; lastMove = last1.lastMove; movedPieces = last1.movedPieces;
+                    if (historyElement.firstChild) historyElement.removeChild(historyElement.firstChild);
+                    if (historyElement.firstChild) historyElement.removeChild(historyElement.firstChild);
+                }
+                
+                selectedSquare = null; legalMoves = []; arrows = []; drawArrows();
                 createBoard();
+                printBoardToConsole(); // In bàn cờ sau khi Undo
             }
         }
 
@@ -539,10 +646,59 @@
             isFlipped = !isFlipped;
             boardElement.classList.add('flipping');
             boardElement.classList.toggle('flipped', isFlipped);
-            setTimeout(() => {
-                boardElement.classList.remove('flipping');
-            }, 800);
+            document.querySelector('.eval-container').classList.toggle('flipped', isFlipped); // Xoay cả thanh Eval
+            setTimeout(() => boardElement.classList.remove('flipping'), 800);
         }
+
+        // --- LOGIC MŨI TÊN (GIỮ NGUYÊN) ---
+        boardElement.oncontextmenu = (e) => e.preventDefault();
+        boardElement.addEventListener('mousedown', (e) => {
+            if (e.button === 2) {
+                const rect = boardElement.getBoundingClientRect();
+                let c = Math.floor((e.clientX - rect.left) / 60);
+                let r = Math.floor((e.clientY - rect.top) / 60);
+                if (isFlipped) { r = 7 - r; c = 7 - c; }
+                rightClickStart = { r, c };
+            }
+        });
+        window.addEventListener('mouseup', (e) => {
+            if (e.button === 2 && rightClickStart) {
+                const rect = boardElement.getBoundingClientRect();
+                let c = Math.floor((e.clientX - rect.left) / 60);
+                let r = Math.floor((e.clientY - rect.top) / 60);
+                if (isFlipped) { r = 7 - r; c = 7 - c; }
+                if (r >= 0 && r < 8 && c >= 0 && c < 8 && (r !== rightClickStart.r || c !== rightClickStart.c)) {
+                    const newArrow = { from: rightClickStart, to: { r, c } };
+                    const index = arrows.findIndex(a => a.from.r === newArrow.from.r && a.from.c === newArrow.from.c && a.to.r === newArrow.to.r && a.to.c === newArrow.to.c);
+                    if (index > -1) arrows.splice(index, 1); else arrows.push(newArrow);
+                    drawArrows();
+                }
+                rightClickStart = null;
+            }
+        });
+        function drawArrows() {
+            arrowSvg.querySelectorAll('line, path').forEach(l => l.remove());
+            arrows.forEach(arrow => {
+                const dr = Math.abs(arrow.to.r - arrow.from.r); const dc = Math.abs(arrow.to.c - arrow.from.c);
+                const x1 = arrow.from.c * 60 + 30; const y1 = arrow.from.r * 60 + 30;
+                const x2 = arrow.to.c * 60 + 30; const y2 = arrow.to.r * 60 + 30;
+                if ((dr === 1 && dc === 2) || (dr === 2 && dc === 1)) {
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    let cx = dr > dc ? x1 : x2; let cy = dr > dc ? y2 : y1;
+                    path.setAttribute("d", `M ${x1} ${y1} L ${cx} ${cy} L ${x2} ${y2}`);
+                    path.setAttribute("stroke", "rgba(230, 126, 34, 0.6)"); path.setAttribute("stroke-width", "5");
+                    path.setAttribute("fill", "none"); path.setAttribute("marker-end", "url(#arrowhead)");
+                    path.setAttribute("stroke-linecap", "round"); arrowSvg.appendChild(path);
+                } else {
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", x1); line.setAttribute("y1", y1); line.setAttribute("x2", x2); line.setAttribute("y2", y2);
+                    line.setAttribute("stroke", "rgba(230, 126, 34, 0.6)"); line.setAttribute("stroke-width", "5");
+                    line.setAttribute("marker-end", "url(#arrowhead)"); line.setAttribute("stroke-linecap", "round");
+                    arrowSvg.appendChild(line);
+                }
+            });
+        }
+        window.addEventListener('keydown', (e) => { if (e.key.toLowerCase() === 'q') { arrows = []; drawArrows(); } });
 
         createBoard();
     </script>
